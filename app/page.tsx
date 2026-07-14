@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabase";
 
 export const revalidate = 60;
@@ -70,12 +71,13 @@ export default async function FeedPage() {
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
                   {n.publisher && <span>{n.publisher}</span>}
                   {n.tickers.slice(0, 8).map((t) => (
-                    <span
+                    <Link
                       key={t}
-                      className="px-1.5 py-0.5 rounded border border-border text-text font-mono"
+                      href={`/ticker/${t}`}
+                      className="px-1.5 py-0.5 rounded border border-border text-text font-mono hover:text-accent hover:border-accent"
                     >
                       ${t}
-                    </span>
+                    </Link>
                   ))}
                   {n.sentiment && (
                     <span className={`font-mono ${sentimentClass(n.sentiment)}`}>
