@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
     errors.push({ stage: "filings", message: String(e?.message ?? e) });
   }
 
-  // ---------- Movers: FMP (Polygon free tier blocks snapshot endpoints) ----------
+  // ---------- Movers: FMP /stable feeds (v3 legacy endpoints are dead) ----------
   try {
     if (!process.env.FMP_API_KEY) throw new Error("FMP_API_KEY not set — skipping movers");
     const [gainers, losers, active] = await Promise.all([
@@ -140,8 +140,8 @@ export async function GET(req: NextRequest) {
       last_price: m.price ?? null,
       change_amount: m.change ?? null,
       change_percent: m.changesPercentage ?? null,
-      volume: null,
-      prev_close: null,
+      volume: m.volume ?? null,
+      prev_close: m.prevClose ?? null,
     });
     const rows = [
       ...gainers.slice(0, 20).map(toRow("gainers")),
