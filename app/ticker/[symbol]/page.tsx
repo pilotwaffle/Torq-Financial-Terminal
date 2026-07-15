@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { supabaseAdmin } from "@/lib/supabase";
+import TickerSearch from "@/components/TickerSearch";
 
 export const dynamic = "force-dynamic";
 
@@ -59,15 +60,21 @@ export default async function TickerPage({ params }: Params) {
 
   return (
     <div>
-      <div className="flex items-baseline gap-3 mb-6">
-        <h1 className="text-2xl font-mono tracking-tight text-accent">${sym}</h1>
-        <Link href="/" className="text-xs text-muted hover:text-text">
-          ← back to feed
-        </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-2xl font-mono tracking-tight text-accent">${sym}</h1>
+          <Link href="/" className="text-xs text-muted hover:text-text">
+            ← back to feed
+          </Link>
+        </div>
+        <TickerSearch size="sm" />
       </div>
 
       {empty && (
-        <div className="text-muted text-sm">No news, filings, or congress trades found for ${sym}.</div>
+        <div className="text-muted text-sm">
+          No news, filings, or congress trades found for ${sym}. It may not have appeared in the feed
+          recently — try another symbol above.
+        </div>
       )}
 
       {news.length > 0 && (
