@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 // Time windows (hours) shown as columns in the tracker.
 const WINDOWS: { label: string; hours: number }[] = [

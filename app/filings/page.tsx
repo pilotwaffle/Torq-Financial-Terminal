@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase";
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 type FilingRow = {
   id: number;
