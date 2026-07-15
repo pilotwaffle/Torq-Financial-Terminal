@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { supabaseAdmin } from "@/lib/supabase";
 import TickerSearch from "@/components/TickerSearch";
+import { fetchQuote } from "@/lib/fetchers/quote";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +29,34 @@ function timeAgo(iso: string) {
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+function fmtNum(n: number | null, opts?: { dollar?: boolean; pct?: boolean }) {
+  if (n == null) return "—";
+  const abs = Math.abs(n);
+  const s = abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (opts?.pct) return `${n >= 0 ? "+" : "-"}${s}%`;
+  if (opts?.dollar) return `$${n < 0 ? "-" : ""}${s}`;
+  return s;
+}
+function fmtBig(n: number | null) {
+  if (n == null) return "—";
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  return `$${n.toLocaleString("en-US")}`;
+}
+function fmtVol(n: number | null) {
+  if (n == null) return "—";
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
+}
 
 export default async function TickerPage({ params }: Params) {
   const sym = params.symbol.toUpperCase();
 
-  const [newsRes, filingsRes, tradesRes] = await Promise.all([
+  const [quote, newsRes, filingsRes, tradesRes] = await Promise.all([
+    fetchQuote(sym),
     supabaseAdmin
       .from("news_items")
       .select("id, headline, url, publisher, sentiment, published_at")
@@ -63,6 +87,7 @@ export default async function TickerPage({ params }: Params) {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div className="flex items-baseline gap-3">
           <h1 className="text-2xl font-mono tracking-tight text-accent">${sym}</h1>
+          {quote?.name && <span className="text-sm text-muted truncate max-w-[240px]">{quote.name}</span>}
           <Link href="/" className="text-xs text-muted hover:text-text">
             ← back to feed
           </Link>
@@ -70,10 +95,46 @@ export default async function TickerPage({ params }: Params) {
         <TickerSearch size="sm" />
       </div>
 
+      {quote && quote.price != null && (
+        <div className="border border-border rounded-lg p-4 mb-8">
+          <div className="flex items-end flex-wrap gap-x-4 gap-y-1">
+            <span className="text-3xl font-mono">{fmtNum(quote.price, { dollar: true })}</span>
+            <span
+              className={`text-lg font-mono ${
+                (quote.change ?? 0) >= 0 ? "text-accent" : "text-danger"
+              }`}
+            >
+              {fmtNum(quote.change, { dollar: true })} ({fmtNum(quote.changePercent, { pct: true })})
+            </span>
+            <span className="text-xs text-muted font-mono ml-auto">
+              {quote.exchange ? `${quote.exchange} · ` : ""}live via {quote.source}
+            </span>
+          </div>
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-2 text-xs font-mono">
+            <Metric label="Open" value={fmtNum(quote.open, { dollar: true })} />
+            <Metric label="Prev close" value={fmtNum(quote.prevClose, { dollar: true })} />
+            <Metric
+              label="Day range"
+              value={
+                quote.dayLow != null && quote.dayHigh != null
+                  ? `${fmtNum(quote.dayLow, { dollar: true })} – ${fmtNum(quote.dayHigh, { dollar: true })}`
+                  : "—"
+              }
+            />
+            <Metric label="Volume" value={fmtVol(quote.volume)} />
+            <Metric label="Mkt cap" value={fmtBig(quote.marketCap)} />
+          </div>
+        </div>
+      )}
+
+      {quote == null && (
+        <div className="text-muted text-xs mb-6">Live quote unavailable for ${sym}.</div>
+      )}
+
       {empty && (
         <div className="text-muted text-sm">
-          No news, filings, or congress trades found for ${sym}. It may not have appeared in the feed
-          recently — try another symbol above.
+          No news, filings, or congress trades found for ${sym}
+          {quote?.price != null ? "." : " — it may not have appeared in the feed recently. Try another symbol above."}
         </div>
       )}
 
@@ -141,6 +202,15 @@ export default async function TickerPage({ params }: Params) {
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-muted/60">{label}</div>
+      <div className="text-text mt-0.5">{value}</div>
     </div>
   );
 }
