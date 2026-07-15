@@ -10,6 +10,8 @@ import { fetchPolygonNews } from "@/lib/fetchers/polygon";
 import { fetchFinnhubGeneralNews } from "@/lib/fetchers/finnhub";
 import { fetchRecentEdgarFilings } from "@/lib/fetchers/edgar";
 import { fetchFmpMovers } from "@/lib/fetchers/fmp";
+import { fetchCongressTrades } from "@/lib/fetchers/congress";
+import { generateBriefing } from "@/lib/fetchers/briefing";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // seconds — Vercel Hobby supports up to 60s for cron
@@ -35,6 +37,8 @@ export async function GET(req: NextRequest) {
   let newsInserted = 0;
   let filingsInserted = 0;
   let moversInserted = 0;
+  let congressInserted = 0;
+  let briefingInserted = 0;
 
   // Pull window: anything published in the last 6 hours (cron runs every 4, 2hr overlap)
   const sinceISO = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
@@ -155,8 +159,82 @@ export async function GET(req: NextRequest) {
     errors.push({ stage: "movers", message: String(e?.message ?? e) });
   }
 
+  // ---------- Congress trades: FMP house-latest + senate-latest ----------
+  try {
+    const trades = await fetchCongressTrades();
+    // Dedup within batch on the table's unique key
+    // (representative, ticker, transaction_date, transaction_type, amount_range)
+    const seen = new Set<string>();
+    const unique = trades.filter((t) => {
+      const k = `${t.representative}|${t.ticker}|${t.transactionDate}|${t.transactionType}|${t.amountRange}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (unique.length > 0) {
+      const rows = unique.map((t) => ({
+        representative: t.representative,
+        bio_guide_id: t.bioGuideId,
+        party: null, // FMP feed doesn't provide party affiliation
+        chamber: t.chamber,
+        state: t.state,
+        ticker: t.ticker,
+        transaction_type: t.transactionType,
+        amount_range: t.amountRange,
+        amount_low: t.amountLow,
+        transaction_date: t.transactionDate,
+        report_date: t.reportDate,
+        description: t.description,
+      }));
+      const { error, count } = await supabaseAdmin
+        .from("news_congress_trades")
+        .upsert(rows, {
+          onConflict: "representative,ticker,transaction_date,transaction_type,amount_range",
+          count: "exact",
+          ignoreDuplicates: true,
+        });
+      if (error) throw error;
+      congressInserted += count ?? rows.length;
+    }
+  } catch (e: any) {
+    errors.push({ stage: "congress", message: String(e?.message ?? e) });
+  }
+
+  // ---------- Daily briefing: AI summary of recent news + filings ----------
+  try {
+    const [{ data: recentNews }, { data: recentFilings }] = await Promise.all([
+      supabaseAdmin
+        .from("news_items")
+        .select("headline, tickers, sentiment")
+        .order("published_at", { ascending: false })
+        .limit(60),
+      supabaseAdmin
+        .from("news_filings")
+        .select("company_name, form_type, ticker")
+        .order("filed_at", { ascending: false })
+        .limit(30),
+    ]);
+    const briefing = await generateBriefing({
+      headlines: (recentNews ?? []) as any,
+      filings: (recentFilings ?? []) as any,
+    });
+    if (briefing) {
+      const { error } = await supabaseAdmin.from("news_briefings").insert({
+        content: briefing.content,
+        model_used: briefing.model,
+        news_count: briefing.newsCount,
+        filings_count: briefing.filingsCount,
+      });
+      if (error) throw error;
+      briefingInserted = 1;
+    }
+  } catch (e: any) {
+    errors.push({ stage: "briefing", message: String(e?.message ?? e) });
+  }
+
   // ---------- Close audit row ----------
-  const status = errors.length === 0 ? "ok" : errors.length === 3 ? "failed" : "partial";
+  const TOTAL_STAGES = 5;
+  const status = errors.length === 0 ? "ok" : errors.length >= TOTAL_STAGES ? "failed" : "partial";
   await supabaseAdmin
     .from("news_cron_runs")
     .update({
@@ -175,6 +253,8 @@ export async function GET(req: NextRequest) {
     news_inserted: newsInserted,
     filings_inserted: filingsInserted,
     movers_inserted: moversInserted,
+    congress_inserted: congressInserted,
+    briefing_inserted: briefingInserted,
     errors,
   });
 }
